@@ -37,9 +37,9 @@ mkosi -C configs/level-0-development -d fedora -r 42 -f build
 
 Build time: ~65 seconds
 
-### Building RHEL/CentOS Images
+### Building RHEL Images
 
-RHEL and CentOS builds require subscription-manager registration:
+RHEL builds require subscription-manager registration:
 
 ```bash
 # Install subscription-manager
