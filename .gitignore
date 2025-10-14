@@ -1,0 +1,50 @@
+# mkosi build artifacts
+mkosi.output/
+mkosi.cache/
+mkosi.builddir/
+mkosi.workspace/
+
+# mkosi local configurations (user-specific overrides)
+mkosi.local.conf
+mkosi.local/
+
+# Generated keys (NEVER commit real keys!)
+*.key
+*.crt
+*.pem
+keys/*.key
+keys/*.crt
+keys/*.pem
+
+# Red Hat subscription certificates
+**/mkosi.sandbox/etc/rhsm/
+**/mkosi.sandbox/etc/pki/entitlement/
+**/mkosi.sandbox/etc/pki/consumer/
+
+# Temporary files
+*.tmp
+*.swp
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Local reference repositories (not committed)
+references/
+
+# Claude Code and local documentation
+.claude/
+docs/
+CLAUDE.md
+SELinux.md
