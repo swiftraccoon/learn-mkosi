@@ -32,16 +32,40 @@ cd learn-mkosi
 ./scripts/build-level.sh 0
 
 # Or build directly
-mkosi -C configs/level-0-development/f42 -f build
+mkosi -C configs/level-0-development -d fedora -r 42 -f build
 ```
 
 Build time: ~65 seconds
 
+### Building RHEL/CentOS Images
+
+RHEL and CentOS builds require subscription-manager registration:
+
+```bash
+# Install subscription-manager
+sudo dnf install subscription-manager
+
+# Register with Red Hat (free developer subscription available)
+sudo subscription-manager register --username USERNAME
+
+# Copy subscription certificates to mkosi sandbox
+sudo mkdir -p configs/level-0-development/mkosi.sandbox/etc/rhsm/ca
+sudo mkdir -p configs/level-0-development/mkosi.sandbox/etc/pki/entitlement
+sudo cp /etc/rhsm/ca/redhat-uep.pem configs/level-0-development/mkosi.sandbox/etc/rhsm/ca/
+sudo cp /etc/pki/entitlement/*.pem configs/level-0-development/mkosi.sandbox/etc/pki/entitlement/
+sudo chown -R $USER:$USER configs/level-0-development/mkosi.sandbox
+
+# Now build RHEL
+./scripts/build-level.sh 0 --os rhel9
+```
+
+Get a free RHEL developer subscription at https://developers.redhat.com
+
 ## 3. Boot and Login
 
 ```bash
-# Boot with QEMU
-mkosi -C configs/level-0-development/f42 qemu
+# Boot with QEMU (Fedora 42)
+mkosi -C configs/level-0-development -d fedora -r 42 qemu
 
 # At login prompt: Just press Enter (no password)
 ```
@@ -53,4 +77,4 @@ You're now running a minimal Fedora 42 system!
 - **For production**: Build Level 1 with `./scripts/build-level.sh 1`
 - **Try other OS**: Use `--os f43`, `--os rawhide`, `--os rhel9`, etc.
 - **Learn more**: Read [README.md](README.md) for full documentation
-- **Customize**: Edit `configs/level-0-development/f42/mkosi.conf` to add packages
+- **Customize**: Edit `configs/level-0-development/mkosi.conf` to add packages

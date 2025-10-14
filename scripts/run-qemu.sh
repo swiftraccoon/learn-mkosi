@@ -171,13 +171,18 @@ case $LEVEL in
         ;;
 esac
 
-CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR/$OS"
+# Handle Level 0 consolidated config vs other levels with OS subdirectories
+if [ "$LEVEL" -eq 0 ]; then
+    CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR"
+    OUTPUT_DIR="$CONFIG_DIR/mkosi.output/$OS"
+else
+    CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR/$OS"
+    OUTPUT_DIR="$CONFIG_DIR/mkosi.output"
+fi
 
 if [ ! -d "$CONFIG_DIR" ]; then
     die "Configuration directory not found: $CONFIG_DIR"
 fi
-
-OUTPUT_DIR="$CONFIG_DIR/mkosi.output"
 
 if [ ! -d "$OUTPUT_DIR" ]; then
     die "Output directory not found: $OUTPUT_DIR

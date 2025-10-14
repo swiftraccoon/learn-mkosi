@@ -1,0 +1,122 @@
+#!/bin/bash
+# Post-installation script for Level 0: Development/Learning
+#
+# NOTE: This script runs twice during mkosi build - once for the base image
+# and once during unified kernel image (UKI) generation. This is expected
+# behavior and all operations below are idempotent.
+set -euo pipefail
+
+echo "==> Running Level 0 (Development) post-installation configuration..."
+
+# Create systemd-tmpfiles config to create mount point directories
+# These directories must exist on their parent partitions AFTER those partitions mount
+mkdir -p "$BUILDROOT/etc/tmpfiles.d"
+cat > "$BUILDROOT/etc/tmpfiles.d/partition-mountpoints.conf" <<'EOF'
+# Create mount point directories for separate partitions
+# These run after parent partitions mount but before child partitions mount
+
+# On /var partition (vda3) - create subdirectories for nested mounts
+D /var/log 0755 root root - -
+D /var/tmp 1777 root root - -
+D /var/spool 0755 root root - -
+D /var/crash 0755 root root - -
+
+# Top-level mount points (on root partition)
+D /home 0755 root root - -
+D /opt 0755 root root - -
+D /srv 0755 root root - -
+EOF
+
+# Enable essential services
+systemctl --root="$BUILDROOT" enable NetworkManager.service
+systemctl --root="$BUILDROOT" enable firewalld.service
+systemctl --root="$BUILDROOT" enable chronyd.service
+
+# Disable unnecessary services (only if they exist)
+if [ -f "$BUILDROOT/usr/lib/systemd/system/systemd-resolved.service" ]; then
+    systemctl --root="$BUILDROOT" disable systemd-resolved.service || true
+fi
+systemctl --root="$BUILDROOT" mask debug-shell.service 2>/dev/null || true
+systemctl --root="$BUILDROOT" mask kdump.service 2>/dev/null || true
+
+# Configure firewall (permissive for development)
+mkdir -p "$BUILDROOT/etc/firewalld"
+cat > "$BUILDROOT/etc/firewalld/firewalld.conf" <<EOF
+# Level 0 firewall configuration - development permissive
+DefaultZone=public
+MinimalMark=100
+CleanupOnExit=yes
+Lockdown=no
+EOF
+
+# Basic sudoers configuration
+echo '%wheel ALL=(ALL) ALL' > "$BUILDROOT/etc/sudoers.d/wheel"
+chmod 0440 "$BUILDROOT/etc/sudoers.d/wheel"
+
+# Set umask to 027 for better default file permissions
+mkdir -p "$BUILDROOT/etc/profile.d"
+cat > "$BUILDROOT/etc/profile.d/umask.sh" <<EOF
+# Set restrictive umask
+umask 027
+EOF
+
+# Disable core dumps for security
+mkdir -p "$BUILDROOT/etc/security/limits.d"
+cat > "$BUILDROOT/etc/security/limits.d/core.conf" <<EOF
+# Disable core dumps
+* hard core 0
+EOF
+
+# Configure systemd coredump
+mkdir -p "$BUILDROOT/etc/systemd"
+cat > "$BUILDROOT/etc/systemd/coredump.conf" <<EOF
+[Coredump]
+Storage=none
+ProcessSizeMax=0
+EOF
+
+# Fix systemd-boot to enable UKI (Unified Kernel Image) boot
+# mkosi creates entries.srel with "type1" but we need "type1+type2" for UKI support
+# Type 1 = traditional .conf entries, Type 2 = UKI auto-discovery from /EFI/Linux/
+mkdir -p "$BUILDROOT/boot/loader/entries"
+mkdir -p "$BUILDROOT/efi/loader/entries"
+echo "type1+type2" > "$BUILDROOT/boot/loader/entries.srel"
+echo "type1+type2" > "$BUILDROOT/efi/loader/entries.srel"
+
+# Kernel hardening via sysctl (basic for development)
+mkdir -p "$BUILDROOT/etc/sysctl.d"
+cat > "$BUILDROOT/etc/sysctl.d/99-security.conf" <<EOF
+# Kernel hardening for Level 0 - basic protections for development
+
+# Restrict dmesg access
+kernel.dmesg_restrict = 1
+
+# Restrict kernel pointers
+kernel.kptr_restrict = 2
+
+# Disable kexec
+kernel.kexec_load_disabled = 1
+
+# Enable ASLR
+kernel.randomize_va_space = 2
+
+# Restrict ptrace
+kernel.yama.ptrace_scope = 1
+
+# Network hardening
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.default.secure_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+net.ipv4.icmp_ignore_bogus_error_responses = 1
+net.ipv4.tcp_syncookies = 1
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+EOF
+
+echo "==> Level 0 post-installation complete."

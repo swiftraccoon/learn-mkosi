@@ -115,13 +115,57 @@ case $LEVEL in
         ;;
 esac
 
-# Build full config path with OS subdirectory
-CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR/$OS"
+# Build full config path
+# Level 0 uses consolidated config with drop-ins, other levels use OS subdirectories
+if [ "$LEVEL" -eq 0 ]; then
+    CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR"
+
+    # Parse OS parameter to extract distribution and release for mkosi
+    case $OS in
+        f42|fedora42)
+            MKOSI_DISTRIBUTION="fedora"
+            MKOSI_RELEASE="42"
+            ;;
+        f43|fedora43)
+            MKOSI_DISTRIBUTION="fedora"
+            MKOSI_RELEASE="43"
+            ;;
+        rawhide|fedorarawhide)
+            MKOSI_DISTRIBUTION="fedora"
+            MKOSI_RELEASE="rawhide"
+            ;;
+        rhel9)
+            MKOSI_DISTRIBUTION="rhel"
+            MKOSI_RELEASE="9"
+            ;;
+        rhel10)
+            MKOSI_DISTRIBUTION="rhel"
+            MKOSI_RELEASE="10"
+            ;;
+        centos9)
+            MKOSI_DISTRIBUTION="centos"
+            MKOSI_RELEASE="9"
+            ;;
+        centos10)
+            MKOSI_DISTRIBUTION="centos"
+            MKOSI_RELEASE="10"
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown OS '$OS' for Level 0${NC}"
+            echo -e "${YELLOW}Supported: f42, f43, rawhide, rhel9, rhel10, centos9, centos10${NC}"
+            exit 1
+            ;;
+    esac
+else
+    CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR/$OS"
+fi
 
 if [ ! -d "$CONFIG_DIR" ]; then
     echo -e "${RED}Error: Configuration directory not found: $CONFIG_DIR${NC}"
-    echo -e "${YELLOW}Available OS configurations:${NC}"
-    ls -1 "$REPO_ROOT/configs/$LEVEL_DIR/" 2>/dev/null | grep -v "mkosi.output" || echo "  (none found)"
+    if [ "$LEVEL" -ne 0 ]; then
+        echo -e "${YELLOW}Available OS configurations:${NC}"
+        ls -1 "$REPO_ROOT/configs/$LEVEL_DIR/" 2>/dev/null | grep -v "mkosi.output" | grep -v "mkosi.conf" || echo "  (none found)"
+    fi
     exit 1
 fi
 
@@ -192,11 +236,18 @@ echo ""
 echo -e "${GREEN}Starting build (output logged to ${LOG_FILE})...${NC}"
 START_TIME=$(date +%s)
 
+# Build mkosi command with distribution and release for Level 0
+if [ "$LEVEL" -eq 0 ]; then
+    MKOSI_OPTS="-C \"$CONFIG_DIR\" -d \"$MKOSI_DISTRIBUTION\" -r \"$MKOSI_RELEASE\" $FORCE_FLAGS build"
+else
+    MKOSI_OPTS="-C \"$CONFIG_DIR\" $FORCE_FLAGS build"
+fi
+
 # Use script command to capture all terminal output including ANSI codes
 # Fall back to tee if script is not available
 if command -v script &> /dev/null; then
     # script command captures everything including progress bars
-    if ! script -q -c "$MKOSI_BIN -C \"$CONFIG_DIR\" $FORCE_FLAGS build" "$LOG_FILE"; then
+    if ! script -q -c "$MKOSI_BIN $MKOSI_OPTS" "$LOG_FILE"; then
         echo ""
         echo -e "${RED}========================================${NC}"
         echo -e "${RED}Build FAILED for $LEVEL_NAME${NC}"
@@ -206,7 +257,7 @@ if command -v script &> /dev/null; then
     fi
 else
     # Fallback: redirect both stdout and stderr
-    if ! $MKOSI_BIN -C "$CONFIG_DIR" $FORCE_FLAGS build 2>&1 | tee "$LOG_FILE"; then
+    if ! eval "$MKOSI_BIN $MKOSI_OPTS" 2>&1 | tee "$LOG_FILE"; then
         echo ""
         echo -e "${RED}========================================${NC}"
         echo -e "${RED}Build FAILED for $LEVEL_NAME${NC}"
@@ -230,8 +281,64 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Build SUCCESSFUL for $LEVEL_NAME${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
+
+# Fix fstab mount option conflicts for Level 0 (multiple partitions)
+if [ "$LEVEL" -eq 0 ]; then
+    OUTPUT_FILES_DIR="$CONFIG_DIR/mkosi.output/$OS"
+
+    # Determine IMAGE_ID from drop-in configs
+    case $OS in
+        f42|f43|rawhide) IMAGE_ID="fedora-dev-level0" ;;
+        rhel9|rhel10) IMAGE_ID="rhel-dev-level0" ;;
+        centos9|centos10) IMAGE_ID="centos-dev-level0" ;;
+    esac
+    IMAGE_VERSION="1.0"
+
+    COMPRESSED_IMAGE="$OUTPUT_FILES_DIR/${IMAGE_ID}_${IMAGE_VERSION}.raw.zst"
+    RAW_IMAGE="$OUTPUT_FILES_DIR/${IMAGE_ID}_${IMAGE_VERSION}.raw"
+
+    if [ -f "$COMPRESSED_IMAGE" ]; then
+        echo -e "${YELLOW}Fixing fstab mount option conflicts...${NC}"
+
+        # Decompress
+        echo -e "${BLUE}  Decompressing image...${NC}"
+        zstd -d -f "$COMPRESSED_IMAGE" -o "$RAW_IMAGE"
+
+        # Mount and fix
+        echo -e "${BLUE}  Mounting image...${NC}"
+        LOOP_DEV=$(sudo losetup -f --show -P "$RAW_IMAGE")
+        TEMP_MOUNT=$(mktemp -d)
+
+        sudo mount "${LOOP_DEV}p2" "$TEMP_MOUNT"
+
+        if [ -f "$TEMP_MOUNT/etc/fstab" ]; then
+            echo -e "${BLUE}  Cleaning fstab...${NC}"
+            sudo sed -i -E 's/\bsuid\b//g; s/\bdev\b//g; s/\bexec\b//g' "$TEMP_MOUNT/etc/fstab"
+            sudo sed -i -E 's/,+/,/g; s/(\b\w+\b)(,\1)+/\1/g' "$TEMP_MOUNT/etc/fstab"
+            echo -e "${GREEN}  Cleaned fstab:${NC}"
+            sudo cat "$TEMP_MOUNT/etc/fstab" | grep -v "^#" | grep "UUID="
+        fi
+
+        sudo umount "$TEMP_MOUNT"
+        sudo losetup -d "$LOOP_DEV"
+        rmdir "$TEMP_MOUNT"
+
+        # Re-compress
+        echo -e "${BLUE}  Re-compressing image...${NC}"
+        zstd -f -19 "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
+        rm -f "$RAW_IMAGE"
+
+        echo -e "${GREEN}  fstab fixed successfully${NC}"
+    fi
+fi
+
+echo ""
 echo -e "${GREEN}Build time: ${DURATION}s${NC}"
-echo -e "${GREEN}Output directory: $CONFIG_DIR/mkosi.output/${NC}"
+if [ "$LEVEL" -eq 0 ]; then
+    echo -e "${GREEN}Output directory: $CONFIG_DIR/mkosi.output/$OS/${NC}"
+else
+    echo -e "${GREEN}Output directory: $CONFIG_DIR/mkosi.output/${NC}"
+fi
 echo -e "${BLUE}Build log: ${LOG_FILE}${NC}"
 echo ""
 
@@ -245,9 +352,15 @@ if [ "$ERROR_COUNT" -gt 0 ] || [ "$WARNING_COUNT" -gt 0 ]; then
 fi
 
 # Show output files
-if [ -d "$CONFIG_DIR/mkosi.output" ]; then
+if [ "$LEVEL" -eq 0 ]; then
+    OUTPUT_FILES_DIR="$CONFIG_DIR/mkosi.output/$OS"
+else
+    OUTPUT_FILES_DIR="$CONFIG_DIR/mkosi.output"
+fi
+
+if [ -d "$OUTPUT_FILES_DIR" ]; then
     echo -e "${BLUE}Generated files:${NC}"
-    ls -lh "$CONFIG_DIR/mkosi.output/" | grep -v "^total" | awk '{print "  " $9 " (" $5 ")"}'
+    ls -lh "$OUTPUT_FILES_DIR/" | grep -v "^total" | awk '{print "  " $9 " (" $5 ")"}'
     echo ""
 fi
 

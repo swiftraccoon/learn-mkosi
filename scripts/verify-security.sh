@@ -88,15 +88,24 @@ case $LEVEL in
 esac
 
 CONFIG_NAME="$LEVEL_DIR"
-CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR/$OS"
+
+# Handle Level 0 consolidated config vs other levels with OS subdirectories
+if [ "$LEVEL" -eq 0 ]; then
+    CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR"
+    OUTPUT_CHECK_DIR="$CONFIG_DIR/mkosi.output/$OS"
+else
+    CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR/$OS"
+    OUTPUT_CHECK_DIR="$CONFIG_DIR/mkosi.output"
+fi
 
 if [ ! -d "$CONFIG_DIR" ]; then
     echo -e "${RED}Error: Configuration directory not found: $CONFIG_DIR${NC}"
     exit 1
 fi
 
-if [ ! -d "$CONFIG_DIR/mkosi.output" ]; then
+if [ ! -d "$OUTPUT_CHECK_DIR" ]; then
     echo -e "${RED}Error: Image not built. Run build-level.sh first.${NC}"
+    echo -e "${RED}Expected output: $OUTPUT_CHECK_DIR${NC}"
     exit 1
 fi
 
@@ -124,12 +133,31 @@ check_warn() {
     ((CHECKS_WARNING++))
 }
 
+# Helper function for mkosi shell commands
+mkosi_shell() {
+    if [ "$LEVEL" -eq 0 ]; then
+        # Parse OS to get distribution and release
+        case $OS in
+            f42) mkosi -C "$CONFIG_DIR" -d fedora -r 42 shell -- "$@" ;;
+            f43) mkosi -C "$CONFIG_DIR" -d fedora -r 43 shell -- "$@" ;;
+            rawhide) mkosi -C "$CONFIG_DIR" -d fedora -r rawhide shell -- "$@" ;;
+            rhel9) mkosi -C "$CONFIG_DIR" -d rhel -r 9 shell -- "$@" ;;
+            rhel10) mkosi -C "$CONFIG_DIR" -d rhel -r 10 shell -- "$@" ;;
+            centos9) mkosi -C "$CONFIG_DIR" -d centos -r 9 shell -- "$@" ;;
+            centos10) mkosi -C "$CONFIG_DIR" -d centos -r 10 shell -- "$@" ;;
+            *) echo -e "${RED}Unknown OS: $OS${NC}"; exit 1 ;;
+        esac
+    else
+        mkosi_shell "$@"
+    fi
+}
+
 echo -e "${YELLOW}Running security checks via mkosi shell...${NC}"
 echo ""
 
 # Check SELinux
 echo -e "${BLUE}Checking SELinux configuration...${NC}"
-if mkosi -C "$CONFIG_DIR" shell -- getenforce 2>/dev/null | grep -q "Enforcing"; then
+if mkosi_shell getenforce 2>/dev/null | grep -q "Enforcing"; then
     check_pass "SELinux is in enforcing mode"
 else
     check_fail "SELinux is not in enforcing mode"
@@ -137,7 +165,7 @@ fi
 
 # Check firewall
 echo -e "${BLUE}Checking firewall...${NC}"
-if mkosi -C "$CONFIG_DIR" shell -- systemctl is-enabled firewalld 2>/dev/null | grep -q "enabled"; then
+if mkosi_shell systemctl is-enabled firewalld 2>/dev/null | grep -q "enabled"; then
     check_pass "Firewalld is enabled"
 else
     check_warn "Firewalld is not enabled"
@@ -146,7 +174,7 @@ fi
 # Check for minimal package count (Level 0-1)
 if [[ "$CONFIG_NAME" == *"level-0"* ]] || [[ "$CONFIG_NAME" == *"level-1"* ]]; then
     echo -e "${BLUE}Checking package count...${NC}"
-    PKG_COUNT=$(mkosi -C "$CONFIG_DIR" shell -- rpm -qa | wc -l)
+    PKG_COUNT=$(mkosi_shell rpm -qa | wc -l)
     if [[ "$CONFIG_NAME" == *"level-0"* ]] && [ "$PKG_COUNT" -lt 200 ]; then
         check_pass "Package count is minimal for development ($PKG_COUNT packages)"
     elif [[ "$CONFIG_NAME" == *"level-1"* ]] && [ "$PKG_COUNT" -lt 260 ]; then
@@ -163,28 +191,28 @@ if [[ "$CONFIG_NAME" == *"level-1"* ]]; then
     echo -e "${BLUE}Checking production baseline features (Level 1)...${NC}"
 
     # Check SSH server
-    if mkosi -C "$CONFIG_DIR" shell -- systemctl is-enabled sshd 2>/dev/null | grep -q "enabled"; then
+    if mkosi_shell systemctl is-enabled sshd 2>/dev/null | grep -q "enabled"; then
         check_pass "SSH server is enabled"
     else
         check_fail "SSH server is not enabled (required for Level 1)"
     fi
 
     # Check audit
-    if mkosi -C "$CONFIG_DIR" shell -- systemctl is-enabled auditd 2>/dev/null | grep -q "enabled"; then
+    if mkosi_shell systemctl is-enabled auditd 2>/dev/null | grep -q "enabled"; then
         check_pass "Audit daemon is enabled"
     else
         check_fail "Audit daemon is not enabled (required for Level 1)"
     fi
 
     # Check automated updates
-    if mkosi -C "$CONFIG_DIR" shell -- systemctl is-enabled dnf-automatic.timer 2>/dev/null | grep -q "enabled"; then
+    if mkosi_shell systemctl is-enabled dnf-automatic.timer 2>/dev/null | grep -q "enabled"; then
         check_pass "Automated security updates are enabled"
     else
         check_fail "Automated security updates are not enabled"
     fi
 
     # Check AIDE timer
-    if mkosi -C "$CONFIG_DIR" shell -- systemctl is-enabled aide-check.timer 2>/dev/null | grep -q "enabled"; then
+    if mkosi_shell systemctl is-enabled aide-check.timer 2>/dev/null | grep -q "enabled"; then
         check_pass "AIDE file integrity monitoring is enabled"
     else
         check_warn "AIDE file integrity monitoring is not enabled"
@@ -194,7 +222,7 @@ fi
 # Check for audit (Level 2+)
 if [[ "$CONFIG_NAME" == *"level-2"* ]] || [[ "$CONFIG_NAME" == *"level-3"* ]]; then
     echo -e "${BLUE}Checking audit system (Level 2+)...${NC}"
-    if mkosi -C "$CONFIG_DIR" shell -- systemctl is-enabled auditd 2>/dev/null | grep -q "enabled"; then
+    if mkosi_shell systemctl is-enabled auditd 2>/dev/null | grep -q "enabled"; then
         check_pass "Audit daemon is enabled"
     else
         check_fail "Audit daemon is not enabled"
@@ -204,7 +232,7 @@ fi
 # Check for fail2ban (Level 2+)
 if [[ "$CONFIG_NAME" == *"level-2"* ]] || [[ "$CONFIG_NAME" == *"level-3"* ]]; then
     echo -e "${BLUE}Checking fail2ban (Level 2+)...${NC}"
-    if mkosi -C "$CONFIG_DIR" shell -- systemctl is-enabled fail2ban 2>/dev/null | grep -q "enabled"; then
+    if mkosi_shell systemctl is-enabled fail2ban 2>/dev/null | grep -q "enabled"; then
         check_pass "Fail2ban is enabled"
     else
         check_fail "Fail2ban is not enabled"
@@ -214,7 +242,7 @@ fi
 # Check for FIPS (Level 3)
 if [[ "$CONFIG_NAME" == *"level-3"* ]]; then
     echo -e "${BLUE}Checking FIPS mode (Level 3)...${NC}"
-    if mkosi -C "$CONFIG_DIR" shell -- cat /proc/sys/crypto/fips_enabled 2>/dev/null | grep -q "1"; then
+    if mkosi_shell cat /proc/sys/crypto/fips_enabled 2>/dev/null | grep -q "1"; then
         check_pass "FIPS mode is enabled"
     else
         check_warn "FIPS mode not enabled (requires first boot with fips=1 kernel param)"
@@ -224,7 +252,7 @@ fi
 # Check for USBGuard (Level 3)
 if [[ "$CONFIG_NAME" == *"level-3"* ]]; then
     echo -e "${BLUE}Checking USBGuard (Level 3)...${NC}"
-    if mkosi -C "$CONFIG_DIR" shell -- systemctl is-enabled usbguard 2>/dev/null | grep -q "enabled"; then
+    if mkosi_shell systemctl is-enabled usbguard 2>/dev/null | grep -q "enabled"; then
         check_pass "USBGuard is enabled"
     else
         check_warn "USBGuard is not enabled"
@@ -233,7 +261,7 @@ fi
 
 # Check systemd security
 echo -e "${BLUE}Checking systemd service security...${NC}"
-if mkosi -C "$CONFIG_DIR" shell -- systemd-analyze security --no-pager 2>/dev/null | head -5 | grep -q "MEDIUM\\|OK"; then
+if mkosi_shell systemd-analyze security --no-pager 2>/dev/null | head -5 | grep -q "MEDIUM\\|OK"; then
     check_pass "Systemd services have security hardening"
 else
     check_warn "Some systemd services may lack security hardening"
@@ -241,7 +269,7 @@ fi
 
 # Check for sysctl hardening
 echo -e "${BLUE}Checking kernel hardening (sysctl)...${NC}"
-if mkosi -C "$CONFIG_DIR" shell -- test -f /etc/sysctl.d/99-security.conf 2>/dev/null; then
+if mkosi_shell test -f /etc/sysctl.d/99-security.conf 2>/dev/null; then
     check_pass "Kernel hardening sysctl configuration present"
 else
     check_fail "Kernel hardening sysctl configuration missing"

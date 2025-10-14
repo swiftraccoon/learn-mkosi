@@ -40,11 +40,12 @@ __pycache__/
 .idea/
 *.sublime-*
 
-# Local reference repositories (not committed)
+# Local reference repositories
 references/
 
-# Claude Code and local documentation
 .claude/
 docs/
 CLAUDE.md
 SELinux.md
+configs/level-2-hardened/
+configs/level-3-maximum/
