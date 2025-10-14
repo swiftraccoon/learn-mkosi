@@ -86,6 +86,39 @@ rw console=hvc0
 - `rw`: Mount root filesystem read-write
 - `console=hvc0`: Output to virtio console (for QEMU)
 
+### First Boot Configuration
+
+The image is pre-configured with systemd-firstboot settings to avoid interactive prompts:
+
+- **Locale**: `C.UTF-8` (minimal universal locale)
+- **Timezone**: `UTC` (standard for servers)
+- **Hostname**: `fedora-level1` (can be changed after boot)
+- **Root Password**: None (passwordless root account)
+
+**Security Note**: Level 1 uses a passwordless root account for development convenience. This means:
+- ✅ You can log in as root without a password via console
+- ✅ Suitable for local development and testing
+- ❌ **NOT suitable for production or network-accessible systems**
+
+To change the root password after boot:
+```bash
+# Boot the system
+scripts/run-qemu.sh 1
+
+# At the login prompt, just press Enter for root
+# Then set a password
+passwd
+```
+
+To configure a password at build time, edit `mkosi.conf`:
+```ini
+# Use a plaintext password
+RootPassword=mypassword
+
+# Or use a hashed password (more secure)
+RootPassword=hashed:$6$rounds=656000$...
+```
+
 ## Customization
 
 Edit `mkosi.conf` to add packages or change configuration.
