@@ -1,4 +1,4 @@
-# Learn mkosi - Minimal Security-Hardened Linux Images
+# Learn mkosi
 
 A comprehensive repository for building minimal, security-hardened Linux images using mkosi, with four distinct security levels optimized for different use cases - from development to maximum security.
 
@@ -235,15 +235,6 @@ Or use a post-installation script in `mkosi.postinst`.
 ### Change Kernel Parameters
 
 Edit the `KernelCommandLineExtra=` option in `mkosi.conf` or modify the bootloader configuration in `mkosi.extra/`.
-
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Test your changes with all security levels
-2. Document security implications
-3. Update relevant documentation
-4. Follow existing configuration patterns
 
 ## References
 

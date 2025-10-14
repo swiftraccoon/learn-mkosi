@@ -2,8 +2,6 @@
 
 Get started building minimal, security-hardened Linux images in minutes.
 
-Supports: Fedora 42, Fedora 43, Fedora Rawhide, RHEL 9, RHEL 10, CentOS Stream 9, CentOS Stream 10
-
 ## Prerequisites
 
 **Important**: These configurations require mkosi v26+. See [SETUP.md](SETUP.md) for setup.
@@ -26,7 +24,22 @@ source ~/.bashrc
 
 ## Build Your First Image
 
-### Level 1: Minimal (Recommended for First Try)
+### Level 0: Development (Recommended for First Try)
+
+```bash
+# Build (Fedora 42)
+mkosi -C configs/level-0-development/f42 -f build
+
+# Boot with QEMU
+mkosi -C configs/level-0-development/f42 qemu
+
+# Login: Just press Enter (passwordless root)
+
+# Or enter a shell
+mkosi -C configs/level-0-development/f42 shell
+```
+
+### Level 1: Production Baseline
 
 ```bash
 # Build (Fedora 42)
@@ -34,6 +47,8 @@ mkosi -C configs/level-1-minimal/f42 -f build
 
 # Boot with QEMU
 mkosi -C configs/level-1-minimal/f42 qemu
+
+# Login: Requires SSH key or password
 
 # Or enter a shell
 mkosi -C configs/level-1-minimal/f42 shell
