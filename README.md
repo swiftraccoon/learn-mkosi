@@ -109,7 +109,7 @@ WARNING: Never use Level 0 in production or network-accessible systems.
 
 ### Required Tools
 
-- mkosi v26 or newer (**Important**: Fedora Rawhide ships v25.3, see [SETUP.md](SETUP.md))
+- mkosi v26 or newer (**Important**: See [QUICKSTART.md](QUICKSTART.md) for installation)
 - systemd-repart
 - QEMU (for testing)
 - Fedora package manager (dnf)
@@ -117,32 +117,7 @@ WARNING: Never use Level 0 in production or network-accessible systems.
 
 ### Installation
 
-**Important**: This repository requires mkosi v26+. Fedora Rawhide currently ships v25.3.
-
-#### Option 1: Use mkosi v26 from Source (Recommended)
-
-A symlink has been created to `references/mkosi/bin/mkosi` (v26~devel):
-
-```bash
-# Add ~/.local/bin to PATH
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-
-# Verify version
-mkosi --version  # Should show: mkosi 26~devel
-```
-
-See [SETUP.md](SETUP.md) for detailed setup instructions.
-
-#### Option 2: System mkosi (Requires v26+)
-
-```bash
-# Install mkosi (only if v26+ available)
-sudo dnf install mkosi
-
-# Check version
-mkosi --version  # Must be 26 or higher
-```
+See [QUICKSTART.md](QUICKSTART.md) for mkosi v26 installation instructions.
 
 ## Building Images
 
