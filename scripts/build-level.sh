@@ -25,14 +25,14 @@ Arguments:
 
 Options:
     -o, --os <os>           OS distribution (f42, rhel9, etc.) [default: f42]
-    -p, --partition <type>  Partition scheme (standard, btrfs-partitions, btrfs-subvolumes)
-                           [default: btrfs-partitions]
+    -p, --profile <type>   Partition scheme profile (standard, btrfs-partitions, btrfs-subvolumes)
+                           [default: btrfs-partitions for Fedora, standard for RHEL/CentOS]
     -f, --force            Force rebuild (clean output)
     -ff                    Force rebuild and clean cache
     -fff                   Force rebuild, clean cache and packages
     -h, --help             Show this help message
 
-Partition Schemes:
+Partition Scheme Profiles (Level 0 only):
     standard          - Traditional ext4 partitioning (CIS-compliant)
     btrfs-partitions  - Btrfs with separate partitions (default, CIS-compliant)
     btrfs-subvolumes  - Single btrfs partition with subvolumes
@@ -43,7 +43,7 @@ Examples:
     $0 0 -p btrfs-subvolumes    Build Level 0 with btrfs subvolumes
     $0 1                        Build Level 1 (Baseline) for Fedora 42
     $0 1 --os rhel9             Build Level 1 for RHEL 9
-    $0 2 -f                     Rebuild Level 2 (Hardened) for Fedora 42
+    $0 2 -f                     Force rebuild Level 2 (Hardened) for Fedora 42
     $0 3 -o rhel9 -ff           Full rebuild Level 3 (Maximum) for RHEL 9
 
 EOF
@@ -70,9 +70,9 @@ while [[ $# -gt 0 ]]; do
             OS="$2"
             shift 2
             ;;
-        -p|--partition)
+        -p|--profile|--partition)
             if [ -z "$2" ] || [[ "$2" == -* ]]; then
-                echo -e "${RED}Error: --partition requires an argument${NC}"
+                echo -e "${RED}Error: --profile requires an argument${NC}"
                 usage
             fi
             PARTITION_SCHEME="$2"
@@ -221,68 +221,26 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "${YELLOW}Configuration: ${CONFIG_DIR}${NC}"
 echo -e "${YELLOW}OS: ${OS}${NC}"
-echo -e "${YELLOW}Partition scheme: ${PARTITION_SCHEME}${NC}"
 echo -e "${YELLOW}Force flags: ${FORCE_FLAGS:-none}${NC}"
+if [ "$LEVEL" -eq 0 ]; then
+    echo -e "${YELLOW}Profile: ${PARTITION_SCHEME}${NC}"
+
+    # Validate that profile directory exists
+    PROFILE_DIR="$CONFIG_DIR/mkosi.profiles/${PARTITION_SCHEME}"
+    if [ ! -d "$PROFILE_DIR" ]; then
+        echo -e "${RED}Error: Profile not found: $PROFILE_DIR${NC}"
+        echo -e "${YELLOW}Available profiles:${NC}"
+        ls -1 "$CONFIG_DIR/mkosi.profiles/" 2>/dev/null | sed 's/^/  /'
+        exit 1
+    fi
+fi
 echo ""
 
-# Setup partition scheme (Level 0 only for now)
-if [ "$LEVEL" -eq 0 ]; then
-    PARTITION_CONFIG_SOURCE="$CONFIG_DIR/mkosi.repart.${PARTITION_SCHEME}"
-    PARTITION_CONFIG_DEST="$CONFIG_DIR/mkosi.repart"
-    FINALIZE_SOURCE="$CONFIG_DIR/mkosi.finalize.${PARTITION_SCHEME}"
-    FINALIZE_DEST="$CONFIG_DIR/mkosi.finalize"
-
-    if [ ! -d "$PARTITION_CONFIG_SOURCE" ]; then
-        echo -e "${RED}Error: Partition scheme configuration not found: $PARTITION_CONFIG_SOURCE${NC}"
-        echo -e "${YELLOW}Available schemes in $CONFIG_DIR:${NC}"
-        ls -d "$CONFIG_DIR"/mkosi.repart.* 2>/dev/null | xargs -n1 basename | sed 's/mkosi.repart./  /'
-        exit 1
-    fi
-
-    # Remove existing symlink and create new one
-    if [ -L "$PARTITION_CONFIG_DEST" ]; then
-        rm -f "$PARTITION_CONFIG_DEST"
-    elif [ -e "$PARTITION_CONFIG_DEST" ]; then
-        echo -e "${RED}Error: $PARTITION_CONFIG_DEST exists but is not a symlink. Remove it manually.${NC}"
-        exit 1
-    fi
-
-    # Create symlink to selected partition scheme
-    ln -s "$(basename "$PARTITION_CONFIG_SOURCE")" "$PARTITION_CONFIG_DEST"
-    echo -e "${GREEN}Using partition configuration: $(basename "$PARTITION_CONFIG_SOURCE")${NC}"
-
-    # Setup finalize script if exists
-    if [ -f "$FINALIZE_SOURCE" ]; then
-        if [ -e "$FINALIZE_DEST" ] || [ -L "$FINALIZE_DEST" ]; then
-            rm -f "$FINALIZE_DEST"
-        fi
-        ln -s "$(basename "$FINALIZE_SOURCE")" "$FINALIZE_DEST"
-        echo -e "${GREEN}Using finalize script: $(basename "$FINALIZE_SOURCE")${NC}"
-    elif [ -e "$FINALIZE_DEST" ]; then
-        # Remove any existing finalize if this scheme doesn't have one
-        rm -f "$FINALIZE_DEST"
-        echo -e "${YELLOW}No finalize script for ${PARTITION_SCHEME}${NC}"
-    fi
-
-    # Setup postinst script if exists (for btrfs-subvolumes fstab creation)
-    POSTINST_SOURCE="$CONFIG_DIR/mkosi.postinst.${PARTITION_SCHEME}"
-    POSTINST_DEST="$CONFIG_DIR/mkosi.postinst"
-
-    if [ -f "$POSTINST_SOURCE" ]; then
-        if [ -e "$POSTINST_DEST" ] || [ -L "$POSTINST_DEST" ]; then
-            rm -f "$POSTINST_DEST"
-        fi
-        ln -s "$(basename "$POSTINST_SOURCE")" "$POSTINST_DEST"
-        echo -e "${GREEN}Using postinst script: $(basename "$POSTINST_SOURCE")${NC}"
-    elif [ -e "$POSTINST_DEST" ]; then
-        # Remove any existing postinst if this scheme doesn't have one
-        rm -f "$POSTINST_DEST"
-    fi
-    echo ""
-fi
+# Cleanup on interruption
+trap 'echo -e "\n${YELLOW}Build interrupted${NC}"; exit 130' INT TERM
 
 # Find the best mkosi binary
-# Prefer ~/.local/bin/mkosi (v26~devel) over system mkosi
+# Prefer ~/.local/bin/mkosi (v26) over system mkosi
 MKOSI_BIN=""
 if [ -n "${MKOSI:-}" ]; then
     # Allow user to specify MKOSI environment variable
@@ -339,35 +297,31 @@ echo ""
 echo -e "${GREEN}Starting build (output logged to ${LOG_FILE})...${NC}"
 START_TIME=$(date +%s)
 
-# Build mkosi command with distribution and release for Level 0
+# Build mkosi command as array for safe argument handling
+MKOSI_ARGS=(-C "$CONFIG_DIR")
+
 if [ "$LEVEL" -eq 0 ]; then
-    MKOSI_OPTS="-C \"$CONFIG_DIR\" -d \"$MKOSI_DISTRIBUTION\" -r \"$MKOSI_RELEASE\" $FORCE_FLAGS build"
-else
-    MKOSI_OPTS="-C \"$CONFIG_DIR\" $FORCE_FLAGS build"
+    MKOSI_ARGS+=(-d "$MKOSI_DISTRIBUTION" -r "$MKOSI_RELEASE")
+    MKOSI_ARGS+=(--profile="$PARTITION_SCHEME")
 fi
 
-# Use script command to capture all terminal output including ANSI codes
-# Fall back to tee if script is not available
-if command -v script &> /dev/null; then
-    # script command captures everything including progress bars
-    if ! script -q -c "$MKOSI_BIN $MKOSI_OPTS" "$LOG_FILE"; then
-        echo ""
-        echo -e "${RED}========================================${NC}"
-        echo -e "${RED}Build FAILED for $LEVEL_NAME${NC}"
-        echo -e "${RED}========================================${NC}"
-        echo -e "${RED}See log: ${LOG_FILE}${NC}"
-        exit 1
-    fi
-else
-    # Fallback: redirect both stdout and stderr
-    if ! eval "$MKOSI_BIN $MKOSI_OPTS" 2>&1 | tee "$LOG_FILE"; then
-        echo ""
-        echo -e "${RED}========================================${NC}"
-        echo -e "${RED}Build FAILED for $LEVEL_NAME${NC}"
-        echo -e "${RED}========================================${NC}"
-        echo -e "${RED}See log: ${LOG_FILE}${NC}"
-        exit 1
-    fi
+if [ -n "$FORCE_FLAGS" ]; then
+    MKOSI_ARGS+=("$FORCE_FLAGS")
+fi
+
+MKOSI_ARGS+=(build)
+
+echo -e "${BLUE}Command: $MKOSI_BIN ${MKOSI_ARGS[*]}${NC}"
+echo ""
+
+# Run mkosi with output logged via tee (pipefail catches mkosi failures)
+if ! "$MKOSI_BIN" "${MKOSI_ARGS[@]}" 2>&1 | tee "$LOG_FILE"; then
+    echo ""
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}Build FAILED for $LEVEL_NAME${NC}"
+    echo -e "${RED}========================================${NC}"
+    echo -e "${RED}See log: ${LOG_FILE}${NC}"
+    exit 1
 fi
 
 END_TIME=$(date +%s)
@@ -417,7 +371,11 @@ fi
 
 # Rotate old logs (keep last 10 per level-os combination)
 cd "$LOGS_DIR"
-ls -t level-${LEVEL}-${OS}-build-*.log 2>/dev/null | tail -n +11 | xargs -r rm -f
+OLD_LOGS=$(ls -t level-${LEVEL}-${OS}-build-*.log 2>/dev/null | tail -n +11)
+if [ -n "$OLD_LOGS" ]; then
+    echo -e "${YELLOW}Rotating old logs (keeping last 10)${NC}"
+    echo "$OLD_LOGS" | xargs rm -f
+fi
 
 # Provide next steps
 echo -e "${YELLOW}Next steps:${NC}"

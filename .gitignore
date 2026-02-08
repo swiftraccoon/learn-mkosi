@@ -8,10 +8,8 @@ mkosi.workspace/
 mkosi.local.conf
 mkosi.local/
 
-# Dynamically created symlinks by build script
-configs/*/mkosi.repart
-configs/*/mkosi.finalize
-configs/*/mkosi.postinst
+# mkosi sandbox directories
+configs/*/mkosi.sandbox/
 
 # Generated keys 
 *.key
