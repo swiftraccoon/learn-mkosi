@@ -24,18 +24,27 @@ Arguments:
     level           Security level to build (0, 1, 2, or 3)
 
 Options:
-    -o, --os <os>   OS distribution (f42, rhel9, etc.) [default: f42]
-    -f, --force     Force rebuild (clean output)
-    -ff             Force rebuild and clean cache
-    -fff            Force rebuild, clean cache and packages
-    -h, --help      Show this help message
+    -o, --os <os>           OS distribution (f42, rhel9, etc.) [default: f42]
+    -p, --partition <type>  Partition scheme (standard, btrfs-partitions, btrfs-subvolumes)
+                           [default: btrfs-partitions]
+    -f, --force            Force rebuild (clean output)
+    -ff                    Force rebuild and clean cache
+    -fff                   Force rebuild, clean cache and packages
+    -h, --help             Show this help message
+
+Partition Schemes:
+    standard          - Traditional ext4 partitioning (CIS-compliant)
+    btrfs-partitions  - Btrfs with separate partitions (default, CIS-compliant)
+    btrfs-subvolumes  - Single btrfs partition with subvolumes
 
 Examples:
-    $0 0                Build Level 0 (Development) for Fedora 42
-    $0 1                Build Level 1 (Baseline) for Fedora 42
-    $0 1 --os rhel9     Build Level 1 for RHEL 9
-    $0 2 -f             Rebuild Level 2 (Hardened) for Fedora 42
-    $0 3 -o rhel9 -ff   Full rebuild Level 3 (Maximum) for RHEL 9
+    $0 0                        Build Level 0 (Development) for Fedora 42
+    $0 0 -p standard            Build Level 0 with ext4 partitions
+    $0 0 -p btrfs-subvolumes    Build Level 0 with btrfs subvolumes
+    $0 1                        Build Level 1 (Baseline) for Fedora 42
+    $0 1 --os rhel9             Build Level 1 for RHEL 9
+    $0 2 -f                     Rebuild Level 2 (Hardened) for Fedora 42
+    $0 3 -o rhel9 -ff           Full rebuild Level 3 (Maximum) for RHEL 9
 
 EOF
     exit 1
@@ -44,6 +53,7 @@ EOF
 # Parse arguments
 LEVEL=""
 OS="f42"  # Default to Fedora 42
+PARTITION_SCHEME=""  # Will be set based on OS
 FORCE_FLAGS=""
 
 while [[ $# -gt 0 ]]; do
@@ -58,6 +68,14 @@ while [[ $# -gt 0 ]]; do
                 usage
             fi
             OS="$2"
+            shift 2
+            ;;
+        -p|--partition)
+            if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                echo -e "${RED}Error: --partition requires an argument${NC}"
+                usage
+            fi
+            PARTITION_SCHEME="$2"
             shift 2
             ;;
         -f)
@@ -156,6 +174,34 @@ if [ "$LEVEL" -eq 0 ]; then
             exit 1
             ;;
     esac
+
+    # Set default partition scheme based on distribution
+    # RHEL/CentOS don't support btrfs, so default to standard (ext4)
+    if [ -z "$PARTITION_SCHEME" ]; then
+        case $MKOSI_DISTRIBUTION in
+            rhel|centos)
+                PARTITION_SCHEME="standard"
+                ;;
+            fedora)
+                PARTITION_SCHEME="btrfs-partitions"
+                ;;
+            *)
+                PARTITION_SCHEME="standard"
+                ;;
+        esac
+    fi
+
+    # Validate partition scheme
+    case $PARTITION_SCHEME in
+        standard|btrfs-partitions|btrfs-subvolumes)
+            # Valid scheme
+            ;;
+        *)
+            echo -e "${RED}Error: Invalid partition scheme '$PARTITION_SCHEME'${NC}"
+            echo -e "${YELLOW}Valid schemes: standard, btrfs-partitions, btrfs-subvolumes${NC}"
+            exit 1
+            ;;
+    esac
 else
     CONFIG_DIR="$REPO_ROOT/configs/$LEVEL_DIR/$OS"
 fi
@@ -175,8 +221,62 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "${YELLOW}Configuration: ${CONFIG_DIR}${NC}"
 echo -e "${YELLOW}OS: ${OS}${NC}"
+echo -e "${YELLOW}Partition scheme: ${PARTITION_SCHEME}${NC}"
 echo -e "${YELLOW}Force flags: ${FORCE_FLAGS:-none}${NC}"
 echo ""
+
+# Setup partition scheme (Level 0 only for now)
+if [ "$LEVEL" -eq 0 ]; then
+    PARTITION_CONFIG_SOURCE="$CONFIG_DIR/mkosi.repart.${PARTITION_SCHEME}"
+    PARTITION_CONFIG_DEST="$CONFIG_DIR/mkosi.repart"
+    FINALIZE_SOURCE="$CONFIG_DIR/mkosi.finalize.${PARTITION_SCHEME}"
+    FINALIZE_DEST="$CONFIG_DIR/mkosi.finalize"
+
+    if [ ! -d "$PARTITION_CONFIG_SOURCE" ]; then
+        echo -e "${RED}Error: Partition scheme configuration not found: $PARTITION_CONFIG_SOURCE${NC}"
+        echo -e "${YELLOW}Available schemes in $CONFIG_DIR:${NC}"
+        ls -d "$CONFIG_DIR"/mkosi.repart.* 2>/dev/null | xargs -n1 basename | sed 's/mkosi.repart./  /'
+        exit 1
+    fi
+
+    # Remove existing symlink/directory and create new one
+    if [ -e "$PARTITION_CONFIG_DEST" ] || [ -L "$PARTITION_CONFIG_DEST" ]; then
+        rm -rf "$PARTITION_CONFIG_DEST"
+    fi
+
+    # Create symlink to selected partition scheme
+    ln -s "$(basename "$PARTITION_CONFIG_SOURCE")" "$PARTITION_CONFIG_DEST"
+    echo -e "${GREEN}Using partition configuration: $(basename "$PARTITION_CONFIG_SOURCE")${NC}"
+
+    # Setup finalize script if exists
+    if [ -f "$FINALIZE_SOURCE" ]; then
+        if [ -e "$FINALIZE_DEST" ] || [ -L "$FINALIZE_DEST" ]; then
+            rm -f "$FINALIZE_DEST"
+        fi
+        ln -s "$(basename "$FINALIZE_SOURCE")" "$FINALIZE_DEST"
+        echo -e "${GREEN}Using finalize script: $(basename "$FINALIZE_SOURCE")${NC}"
+    elif [ -e "$FINALIZE_DEST" ]; then
+        # Remove any existing finalize if this scheme doesn't have one
+        rm -f "$FINALIZE_DEST"
+        echo -e "${YELLOW}No finalize script for ${PARTITION_SCHEME}${NC}"
+    fi
+
+    # Setup postinst script if exists (for btrfs-subvolumes fstab creation)
+    POSTINST_SOURCE="$CONFIG_DIR/mkosi.postinst.${PARTITION_SCHEME}"
+    POSTINST_DEST="$CONFIG_DIR/mkosi.postinst"
+
+    if [ -f "$POSTINST_SOURCE" ]; then
+        if [ -e "$POSTINST_DEST" ] || [ -L "$POSTINST_DEST" ]; then
+            rm -f "$POSTINST_DEST"
+        fi
+        ln -s "$(basename "$POSTINST_SOURCE")" "$POSTINST_DEST"
+        echo -e "${GREEN}Using postinst script: $(basename "$POSTINST_SOURCE")${NC}"
+    elif [ -e "$POSTINST_DEST" ]; then
+        # Remove any existing postinst if this scheme doesn't have one
+        rm -f "$POSTINST_DEST"
+    fi
+    echo ""
+fi
 
 # Find the best mkosi binary
 # Prefer ~/.local/bin/mkosi (v26~devel) over system mkosi
@@ -280,58 +380,6 @@ echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Build SUCCESSFUL for $LEVEL_NAME${NC}"
 echo -e "${GREEN}========================================${NC}"
-echo ""
-
-# Fix fstab mount option conflicts for Level 0 (multiple partitions)
-if [ "$LEVEL" -eq 0 ]; then
-    OUTPUT_FILES_DIR="$CONFIG_DIR/mkosi.output/$OS"
-
-    # Determine IMAGE_ID from drop-in configs
-    case $OS in
-        f42|f43|rawhide) IMAGE_ID="fedora-dev-level0" ;;
-        rhel9|rhel10) IMAGE_ID="rhel-dev-level0" ;;
-        centos9|centos10) IMAGE_ID="centos-dev-level0" ;;
-    esac
-    IMAGE_VERSION="1.0"
-
-    COMPRESSED_IMAGE="$OUTPUT_FILES_DIR/${IMAGE_ID}_${IMAGE_VERSION}.raw.zst"
-    RAW_IMAGE="$OUTPUT_FILES_DIR/${IMAGE_ID}_${IMAGE_VERSION}.raw"
-
-    if [ -f "$COMPRESSED_IMAGE" ]; then
-        echo -e "${YELLOW}Fixing fstab mount option conflicts...${NC}"
-
-        # Decompress
-        echo -e "${BLUE}  Decompressing image...${NC}"
-        zstd -d -f "$COMPRESSED_IMAGE" -o "$RAW_IMAGE"
-
-        # Mount and fix
-        echo -e "${BLUE}  Mounting image...${NC}"
-        LOOP_DEV=$(sudo losetup -f --show -P "$RAW_IMAGE")
-        TEMP_MOUNT=$(mktemp -d)
-
-        sudo mount "${LOOP_DEV}p2" "$TEMP_MOUNT"
-
-        if [ -f "$TEMP_MOUNT/etc/fstab" ]; then
-            echo -e "${BLUE}  Cleaning fstab...${NC}"
-            sudo sed -i -E 's/\bsuid\b//g; s/\bdev\b//g; s/\bexec\b//g' "$TEMP_MOUNT/etc/fstab"
-            sudo sed -i -E 's/,+/,/g; s/(\b\w+\b)(,\1)+/\1/g' "$TEMP_MOUNT/etc/fstab"
-            echo -e "${GREEN}  Cleaned fstab:${NC}"
-            sudo cat "$TEMP_MOUNT/etc/fstab" | grep -v "^#" | grep "UUID="
-        fi
-
-        sudo umount "$TEMP_MOUNT"
-        sudo losetup -d "$LOOP_DEV"
-        rmdir "$TEMP_MOUNT"
-
-        # Re-compress
-        echo -e "${BLUE}  Re-compressing image...${NC}"
-        zstd -f -19 "$RAW_IMAGE" -o "$COMPRESSED_IMAGE"
-        rm -f "$RAW_IMAGE"
-
-        echo -e "${GREEN}  fstab fixed successfully${NC}"
-    fi
-fi
-
 echo ""
 echo -e "${GREEN}Build time: ${DURATION}s${NC}"
 if [ "$LEVEL" -eq 0 ]; then

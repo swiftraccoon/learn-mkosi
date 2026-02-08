@@ -1,0 +1,10 @@
+#!/bin/bash
+# Btrfs partitions postinst - systemd-gpt-auto-generator handles mounting
+set -euo pipefail
+
+# Create autorelabel flag to trigger SELinux relabel on first boot
+# This is needed since we disabled offline relabel (SELinuxRelabel=no) to avoid PCRE mismatch
+echo "==> Creating /.autorelabel to trigger SELinux relabel on first boot..."
+touch "$BUILDROOT/.autorelabel"
+
+echo "==> Btrfs partitions post-installation complete"

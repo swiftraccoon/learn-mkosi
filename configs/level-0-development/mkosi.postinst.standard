@@ -1,0 +1,70 @@
+#!/bin/bash
+# Postinst script for standard partition scheme
+# Handles fstab generation for systemd versions that don't support MountPoint=
+
+set -euxo pipefail
+
+# Use mkosi-provided BUILDROOT environment variable
+root="$BUILDROOT"
+
+# Detect OS and set systemd version accordingly
+# CentOS 9 and RHEL 9 need LABEL-based fstab (systemd < 256)
+# RHEL 10 can use MountPoint= (systemd >= 256)
+SYSTEMD_VERSION=0
+
+# Simple detection based on mkosi Distribution setting
+# This is set via environment or we can check files
+if [ -f "$root/etc/centos-stream-release" ]; then
+    SYSTEMD_VERSION=250  # CentOS Stream 9
+    echo "Postinst: Detected CentOS Stream 9"
+elif [ -f "$root/etc/redhat-release" ]; then
+    # Check RHEL version
+    if grep -q "release 10" "$root/etc/redhat-release" 2>/dev/null; then
+        SYSTEMD_VERSION=257  # RHEL 10
+        echo "Postinst: Detected RHEL 10"
+    else
+        SYSTEMD_VERSION=252  # RHEL 9
+        echo "Postinst: Detected RHEL 9"
+    fi
+else
+    # For CentOS 9 builds, mkosi may not have created release files yet
+    # Force LABEL-based fstab for safety
+    echo "Postinst: Could not detect OS release files, assuming older systemd"
+    SYSTEMD_VERSION=250
+fi
+
+echo "Postinst: Using systemd version: $SYSTEMD_VERSION"
+
+# For systems with systemd < 256, create LABEL-based fstab
+# These systems cannot properly use auto-generated UUID entries
+if [ "$SYSTEMD_VERSION" -lt 256 ] && [ "$SYSTEMD_VERSION" -gt 0 ]; then
+    echo "Postinst: systemd $SYSTEMD_VERSION requires LABEL-based fstab, creating it"
+
+    # Ensure /etc directory exists
+    mkdir -p "$root/etc"
+
+    # Create a fresh fstab (replace any existing one)
+    cat > "$root/etc/fstab" << 'EOF'
+# Standard partitions with LABEL for systems with systemd < 256
+LABEL=root       /           ext4    defaults                         0 1
+LABEL=tmp        /tmp        ext4    defaults,nodev,nosuid,noexec    0 2
+LABEL=var        /var        ext4    defaults,nodev                  0 2
+LABEL=var_log    /var/log    ext4    defaults,nodev,nosuid,noexec    0 2
+LABEL=var_tmp    /var/tmp    ext4    defaults,nodev,nosuid,noexec    0 2
+LABEL=home       /home       ext4    defaults,nodev,nosuid            0 2
+EOF
+    chmod 0644 "$root/etc/fstab"
+    echo "Postinst: Added LABEL-based fstab entries for systemd $SYSTEMD_VERSION"
+elif [ "$SYSTEMD_VERSION" -ge 256 ]; then
+    echo "Postinst: systemd $SYSTEMD_VERSION supports MountPoint=, using auto-generated fstab"
+    # Don't touch fstab for modern systemd
+else
+    echo "Postinst: WARNING: Could not detect systemd version, system may not boot properly"
+fi
+
+# Create autorelabel flag to trigger SELinux relabel on first boot
+# This is needed since we disabled offline relabel (SELinuxRelabel=no) to avoid PCRE mismatch
+echo "Postinst: Creating /.autorelabel to trigger SELinux relabel on first boot..."
+touch "$root/.autorelabel"
+
+echo "Standard partition postinst completed"

@@ -1,0 +1,57 @@
+#!/bin/bash
+# Finalization script for Level 0: Development/Learning with Btrfs Subvolumes
+#
+# CRITICAL: This script must create every directory that will become a btrfs subvolume
+# mkfs.btrfs requires these paths to exist in --rootdir (/buildroot) before it can
+# create them as subvolumes during offline population.
+
+set -euxo pipefail
+
+echo "==> Running Level 0 finalization for btrfs subvolumes..."
+
+root="$BUILDROOT"
+
+# Create all directories that are listed in Subvolumes= in the repart config
+# These must exist before mkfs.btrfs runs, or it will fail with "could not get canonical path"
+echo "Creating directories that will become btrfs subvolumes..."
+
+# Top-level subvolumes
+install -d -m0755 "$root/home"
+install -d -m0700 "$root/root"  # Root's home should be 0700
+install -d -m1777 "$root/tmp"   # Sticky bit for world-writable tmp
+install -d -m0755 "$root/opt"
+install -d -m0755 "$root/srv"
+
+# /var hierarchy - organized by CIS recommendations
+install -d -m0755 "$root/var"
+install -d -m0755 "$root/var/lib"
+install -d -m0755 "$root/var/log"
+install -d -m0755 "$root/var/spool"
+install -d -m0755 "$root/var/cache"
+install -d -m0755 "$root/var/crash"
+install -d -m1777 "$root/var/tmp"  # Sticky bit for world-writable tmp
+
+# Security-sensitive directories
+install -d -m0750 "$root/var/log/audit"  # Restricted audit logs
+
+# systemd-specific directories (for containers/VMs)
+install -d -m0700 "$root/var/lib/machines"   # systemd-nspawn containers
+install -d -m0700 "$root/var/lib/portables"  # Portable services
+install -d -m0755 "$root/var/lib/libvirt"    # Libvirt VMs (if used)
+
+# Note: Do not create /efi or /boot here - that interferes with systemd-boot installation
+
+echo "==> Directories created. systemd-repart will:"
+echo "    1. Create these as btrfs subvolumes via mkfs.btrfs"
+echo "    2. Generate /etc/fstab from MountPoint= directives"
+
+# Fix augenrules error - regenerate audit rules after all packages are installed
+echo "==> Regenerating audit rules (fixes awk not found error)..."
+if [ -x "$root/usr/sbin/augenrules" ]; then
+    chroot "$root" sh -euxc 'command -v augenrules >/dev/null && augenrules --load || true' || true
+fi
+
+# Note: SELinux relabel is disabled in mkosi.conf to avoid PCRE version mismatch
+# First boot will handle the relabel automatically
+
+echo "==> Level 0 btrfs subvolumes finalization complete."

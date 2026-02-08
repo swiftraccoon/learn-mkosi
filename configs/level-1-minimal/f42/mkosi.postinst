@@ -8,6 +8,27 @@ set -euo pipefail
 
 echo "==> Running Level 1 (Production Baseline) post-installation configuration..."
 
+# Create systemd preset file BEFORE enabling services
+# This ensures services survive mkosi's "Applying presets" phase (systemctl preset-all)
+# which resets all services to Fedora defaults AFTER postinst runs.
+# Presets in /etc/ take priority over /usr/lib/ and the 00- prefix ensures
+# our presets are evaluated before the default 90-systemd.preset.
+mkdir -p "$BUILDROOT/etc/systemd/system-preset"
+cat > "$BUILDROOT/etc/systemd/system-preset/00-level1.preset" <<EOF
+# Level 1: Baseline Hardening - Required Services
+# These presets ensure services enabled by postinst survive systemctl preset-all
+enable sshd.service
+enable auditd.service
+enable rsyslog.service
+enable psacct.service
+enable dnf-automatic.timer
+enable dnf5-automatic.timer
+enable aide-check.timer
+enable NetworkManager.service
+enable firewalld.service
+enable chronyd.service
+EOF
+
 # Enable essential services
 systemctl --root="$BUILDROOT" enable NetworkManager.service
 systemctl --root="$BUILDROOT" enable firewalld.service

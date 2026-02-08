@@ -8,7 +8,12 @@ mkosi.workspace/
 mkosi.local.conf
 mkosi.local/
 
-# Generated keys (NEVER commit real keys!)
+# Dynamically created symlinks by build script
+configs/*/mkosi.repart
+configs/*/mkosi.finalize
+configs/*/mkosi.postinst
+
+# Generated keys 
 *.key
 *.crt
 *.pem
@@ -49,3 +54,6 @@ CLAUDE.md
 SELinux.md
 configs/level-2-hardened/
 configs/level-3-maximum/
+ARCHITECTURE.md
+KNOWN-ISSUES.md
+test-partition-schemes.sh

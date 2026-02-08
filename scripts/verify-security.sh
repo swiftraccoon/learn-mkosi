@@ -148,7 +148,7 @@ mkosi_shell() {
             *) echo -e "${RED}Unknown OS: $OS${NC}"; exit 1 ;;
         esac
     else
-        mkosi_shell "$@"
+        mkosi -C "$CONFIG_DIR" shell -- "$@"
     fi
 }
 

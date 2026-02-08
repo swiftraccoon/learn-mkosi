@@ -1,0 +1,42 @@
+#!/bin/bash
+# Finalization script for Level 0: Development/Learning
+# This script runs after the image is built to set btrfs properties
+# that cannot be set via systemd-repart configuration
+#
+# Note: This script runs in the context of the built image root
+
+set -euo pipefail
+
+echo "==> Running Level 0 finalization for btrfs optimization..."
+
+# Set compression property on root filesystem
+# This ensures new files are automatically compressed even if mount options change
+if [ -d "$BUILDROOT" ] && findmnt -n -o FSTYPE "$BUILDROOT" | grep -q btrfs; then
+    echo "Setting btrfs compression property on root..."
+    btrfs property set "$BUILDROOT" compression zstd || true
+fi
+
+# Set compression on all btrfs mount points within the image
+# This is belt-and-suspenders with the mount options, ensuring compression is active
+for dir in / /var /var/log /var/tmp /var/spool /var/crash /home /opt /srv /tmp; do
+    target="$BUILDROOT$dir"
+    if [ -d "$target" ]; then
+        # Check if this directory is on a btrfs filesystem
+        if findmnt -n -o FSTYPE "$target" 2>/dev/null | grep -q btrfs; then
+            echo "Setting btrfs compression property on $dir..."
+            btrfs property set "$target" compression zstd 2>/dev/null || true
+        fi
+    fi
+done
+
+# Enable autodefrag on filesystems that benefit from it
+# This helps with performance on SSDs and reduces fragmentation
+for dir in /home /var; do
+    target="$BUILDROOT$dir"
+    if [ -d "$target" ] && findmnt -n -o FSTYPE "$target" 2>/dev/null | grep -q btrfs; then
+        echo "Note: autodefrag should be set via mount options for $dir"
+        # autodefrag is a mount option, not a property, so it's set in partition configs
+    fi
+done
+
+echo "==> Level 0 btrfs finalization complete."

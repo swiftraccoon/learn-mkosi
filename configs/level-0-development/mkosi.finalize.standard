@@ -1,0 +1,28 @@
+#!/bin/bash
+# Finalize script for standard partition scheme
+# Handles systemd version differences for fstab generation
+
+set -euxo pipefail
+
+root="$BUILDROOT"
+
+# Create essential mount points
+install -d -m0755 "$root/etc"
+install -d -m1777 "$root/tmp"
+install -d -m0755 "$root/var"
+install -d -m0755 "$root/var/log"
+install -d -m1777 "$root/var/tmp"
+install -d -m0755 "$root/home"
+
+# CRITICAL: Ensure /etc/os-release exists for systemd 257
+if [ ! -e "$root/etc/os-release" ]; then
+    if [ -f "$root/usr/lib/os-release" ]; then
+        ln -sf ../usr/lib/os-release "$root/etc/os-release"
+    fi
+fi
+
+# NOTE: fstab generation moved to postinst script
+# finalize runs BEFORE systemd-repart, so LABELs don't exist yet
+# postinst runs AFTER systemd-repart, so LABELs are available
+
+echo "Standard partition finalize completed"
