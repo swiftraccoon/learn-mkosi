@@ -30,6 +30,7 @@ Options:
     -f, --force            Force rebuild (clean output)
     -ff                    Force rebuild and clean cache
     -fff                   Force rebuild, clean cache and packages
+    --cat-config           Show resolved config and exit (don't build)
     -h, --help             Show this help message
 
 Partition Scheme Profiles (Level 0 only):
@@ -55,6 +56,7 @@ LEVEL=""
 OS="f42"  # Default to Fedora 42
 PARTITION_SCHEME=""  # Will be set based on OS
 FORCE_FLAGS=""
+CAT_CONFIG=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -92,6 +94,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force)
             FORCE_FLAGS="-f"
+            shift
+            ;;
+        --cat-config)
+            CAT_CONFIG=true
             shift
             ;;
         -h|--help)
@@ -293,17 +299,25 @@ LOG_FILE="$LOGS_DIR/level-${LEVEL}-${OS}-build-${TIMESTAMP}.log"
 echo -e "${BLUE}Log file: ${LOG_FILE}${NC}"
 echo ""
 
-# Build the image with logging
-echo -e "${GREEN}Starting build (output logged to ${LOG_FILE})...${NC}"
-START_TIME=$(date +%s)
-
-# Build mkosi command as array for safe argument handling
+# Build mkosi base arguments
 MKOSI_ARGS=(-C "$CONFIG_DIR")
 
 if [ "$LEVEL" -eq 0 ]; then
     MKOSI_ARGS+=(-d "$MKOSI_DISTRIBUTION" -r "$MKOSI_RELEASE")
     MKOSI_ARGS+=(--profile="$PARTITION_SCHEME")
 fi
+
+# Handle --cat-config: show resolved config and exit
+if [ "$CAT_CONFIG" = true ]; then
+    echo -e "${BLUE}Resolved configuration:${NC}"
+    echo ""
+    "$MKOSI_BIN" "${MKOSI_ARGS[@]}" cat-config
+    exit 0
+fi
+
+# Build the image with logging
+echo -e "${GREEN}Starting build (output logged to ${LOG_FILE})...${NC}"
+START_TIME=$(date +%s)
 
 if [ -n "$FORCE_FLAGS" ]; then
     MKOSI_ARGS+=("$FORCE_FLAGS")
