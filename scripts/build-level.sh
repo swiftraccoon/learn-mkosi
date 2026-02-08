@@ -239,9 +239,12 @@ if [ "$LEVEL" -eq 0 ]; then
         exit 1
     fi
 
-    # Remove existing symlink/directory and create new one
-    if [ -e "$PARTITION_CONFIG_DEST" ] || [ -L "$PARTITION_CONFIG_DEST" ]; then
-        rm -rf "$PARTITION_CONFIG_DEST"
+    # Remove existing symlink and create new one
+    if [ -L "$PARTITION_CONFIG_DEST" ]; then
+        rm -f "$PARTITION_CONFIG_DEST"
+    elif [ -e "$PARTITION_CONFIG_DEST" ]; then
+        echo -e "${RED}Error: $PARTITION_CONFIG_DEST exists but is not a symlink. Remove it manually.${NC}"
+        exit 1
     fi
 
     # Create symlink to selected partition scheme
